@@ -7,8 +7,6 @@ ckpt/
 *.py[cod]
 *$py.class
 *.parquet
-img_content
-img_style
 output
 
 # C extensions
