@@ -1,104 +1,142 @@
-import torch
 import torch.nn as nn
-from torchvision.models import vgg19
-from loss import adaptive_instance_normalization as adain
-from loss import calc_mean_std
+from .loss import adaptive_instance_normalization as adain
+from .loss import calc_mean_std
 
-# Decoder definition
+
 decoder = nn.Sequential(
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 256, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(512, 256, (3, 3)),
+    nn.ReLU(),
     nn.Upsample(scale_factor=2, mode='nearest'),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 128, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(256, 128, (3, 3)),
+    nn.ReLU(),
     nn.Upsample(scale_factor=2, mode='nearest'),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 128, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(128, 128, (3, 3)),
+    nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 64, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(128, 64, (3, 3)),
+    nn.ReLU(),
+    
     nn.Upsample(scale_factor=2, mode='nearest'),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 64, kernel_size=3),
-    nn.ReLU(inplace=True),
+    nn.Conv2d(64, 64, (3, 3)),
+    nn.ReLU(),
     nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 3, kernel_size=3),
+    nn.Conv2d(64, 3, (3, 3)),
 )
 
-# Encoder based on pre-trained VGG19
-vgg = vgg19(pretrained=True).features
+vgg = nn.Sequential(
+    nn.Conv2d(3, 3, (1, 1)),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(3, 64, (3, 3)),
+    nn.ReLU(),  # relu1-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 64, (3, 3)),
+    nn.ReLU(),  # relu1-2
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 128, (3, 3)),
+    nn.ReLU(),  # relu2-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 128, (3, 3)),
+    nn.ReLU(),  # relu2-2
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 256, (3, 3)),
+    nn.ReLU(),  # relu3-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-4
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 512, (3, 3)),
+    nn.ReLU(),  # relu4-1, this is the last layer used
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-4
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU()  # relu5-4
+)
 
-# Truncate the VGG layers up to relu4_1
-class VGGEncoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.enc_1 = nn.Sequential(*vgg[:4])   # relu1_1
-        self.enc_2 = nn.Sequential(*vgg[4:9]) # relu2_1
-        self.enc_3 = nn.Sequential(*vgg[9:16])# relu3_1
-        self.enc_4 = nn.Sequential(*vgg[16:23])# relu4_1
-        # Freeze encoder weights
-        for param in self.parameters():
-            param.requires_grad = False
 
-    def forward(self, x):
-        results = []
-        x = self.enc_1(x); results.append(x)
-        x = self.enc_2(x); results.append(x)
-        x = self.enc_3(x); results.append(x)
-        x = self.enc_4(x); results.append(x)
-        return results
-
-# Main Net
 class Net(nn.Module):
     def __init__(self, encoder, decoder):
         super(Net, self).__init__()
-        self.encoder = encoder
+        enc_layers = list(encoder.children())
+        self.enc_1 = nn.Sequential(*enc_layers[:4])  # input -> relu1_1
+        self.enc_2 = nn.Sequential(*enc_layers[4:11])  # relu1_1 -> relu2_1
+        self.enc_3 = nn.Sequential(*enc_layers[11:18])  # relu2_1 -> relu3_1
+        self.enc_4 = nn.Sequential(*enc_layers[18:31])  # relu3_1 -> relu4_1
         self.decoder = decoder
         self.mse_loss = nn.MSELoss()
 
-    def encode_with_intermediate(self, x):
-        """
-        Extract relu1_1, relu2_1, relu3_1, relu4_1 from input.
-        """
-        return self.encoder(x)
+        # fix the encoder
+        for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4']:
+            for param in getattr(self, name).parameters():
+                param.requires_grad = False
 
-    def encode(self, x):
-        """
-        Extract relu4_1 from input.
-        """
-        return self.encoder(x)[-1]
+    # extract relu1_1, relu2_1, relu3_1, relu4_1 from input image
+    def encode_with_intermediate(self, input):
+        results = [input]
+        for i in range(4):
+            func = getattr(self, 'enc_{:d}'.format(i + 1))
+            results.append(func(results[-1]))
+        return results[1:]
+
+    # extract relu4_1 from input image
+    def encode(self, input):
+        for i in range(4):
+            input = getattr(self, 'enc_{:d}'.format(i + 1))(input)
+        return input
 
     def calc_content_loss(self, input, target):
-        """
-        Calculate content loss between input and target.
-        """
+        assert (input.size() == target.size())
+        assert (target.requires_grad is False)
         return self.mse_loss(input, target)
 
     def calc_style_loss(self, input, target):
-        """
-        Calculate style loss between input and target.
-        """
+        assert (input.size() == target.size())
+        assert (target.requires_grad is False)
         input_mean, input_std = calc_mean_std(input)
         target_mean, target_std = calc_mean_std(target)
         return self.mse_loss(input_mean, target_mean) + \
                self.mse_loss(input_std, target_std)
 
     def forward(self, content, style, alpha=1.0):
-        """
-        Forward pass for style transfer.
-        """
         assert 0 <= alpha <= 1
         style_feats = self.encode_with_intermediate(style)
         content_feat = self.encode(content)

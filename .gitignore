@@ -1,7 +1,15 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+wandb/
+face2anime/
+experiments/
+ckpt/
 *.py[cod]
 *$py.class
+*.parquet
+img_content
+img_style
+output
 
 # C extensions
 *.so

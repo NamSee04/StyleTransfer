@@ -6,9 +6,9 @@ import torchvision.transforms as T
 from typing import Tuple
 
 
-class AnimePortaraitsDataset(Dataset):
+class AnimeDataset(Dataset):
 
-    def __init__(self, parquet_file: str, train: bool = True) -> None:
+    def __init__(self, parquet_file: str) -> None:
 
         super().__init__()
         self.imageSize = 256
@@ -25,7 +25,7 @@ class AnimePortaraitsDataset(Dataset):
 
     def __getitem__(self, index) -> Tuple[torch.Tensor]:
         record = self.data.iloc[index]
-        image_path = record['id']
+        image_path = record['Path']
         image = Image.open(image_path)
         image_tensor = self.transform(image)
 
