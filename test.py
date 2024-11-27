@@ -41,13 +41,13 @@ def style_transfer(vgg, decoder, content, style, alpha=1.0, interpolation_weight
 def main():
     parser = argparse.ArgumentParser()
     # Basic options
-    parser.add_argument('--content', type=str, default='/home/namsee/Desktop/SCHOOL/cs431/StyleTransfer/img_content/imgHQ11172.png',
+    parser.add_argument('--content', type=str, default='/home/kevvn/Documents/UIT/CS431/StyleTransfer/img_content/imgHQ11172.png',
                         help='File path to the content image')
-    parser.add_argument('--style', type=str, default='/home/namsee/Desktop/SCHOOL/cs431/StyleTransfer/img_style/152030.jpg',
+    parser.add_argument('--style', type=str, default='/home/kevvn/Documents/UIT/CS431/StyleTransfer/img_style/152030.jpg',
                         help='File path to the style image, or multiple style '
                              'images separated by commas for interpolation')
     parser.add_argument('--vgg', type=str, default='./src/ckpt/vgg_normalised.pth')
-    parser.add_argument('--decoder', type=str, default='/home/namsee/Desktop/SCHOOL/cs431/StyleTransfer/src/ckpt/z20.pth')
+    parser.add_argument('--decoder', type=str, default='/home/kevvn/Documents/UIT/CS431/StyleTransfer/src/ckpt/decoder.pth')
 
     # Additional options
     parser.add_argument('--content_size', type=int, default=512,
