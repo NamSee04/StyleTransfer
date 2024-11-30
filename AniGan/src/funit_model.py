@@ -40,17 +40,17 @@ class FUNITModel(nn.Module):
             self.dis_c = Content_classifier()
             self.lambda_content_adv = 0.2
 
-    def evaluate_reference(self, test_A, test_B):
+    def evaluate_reference(self, test_A, test_B, device):
         self.eval()
         self.gen_test.eval()
-        xa = test_A.cuda()
-        xb = test_B.cuda()
+        xa = test_A.to(device)
+        xb = test_B.to(device)
 
         if self.use_attn_encoder:
-            c_xa = self.gen_test.enc_content(xa, torch.zeros(test_A.size()[0], 1))
+            c_xa = self.gen_test.enc_content(xa, torch.zeros(test_A.size()[0], 1).to(device))
         else:
             c_xa = self.gen_test.enc_content(xa)
 
-        s_xb, sf_xb = self.gen_test.Switch_encode(xb, torch.ones(test_B.size()[0], 1))
+        s_xb, sf_xb = self.gen_test.Switch_encode(xb, torch.ones(test_B.size()[0], 1).to(device))
         fake_B = self.gen_test.decode(c_xa, s_xb, sf_xb)
         return fake_B

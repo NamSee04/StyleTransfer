@@ -13,7 +13,7 @@ style_file = st.sidebar.file_uploader("Upload Style Image", type=["jpg", "jpeg",
 alpha = st.sidebar.slider("Stylization Strength (Alpha)", 0.0, 1.0, 1.0)
 
 # Columns for displaying images
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 def resize_image(image, width, height):
     return image.resize((width, height), Image.LANCZOS)
@@ -39,14 +39,25 @@ if st.sidebar.button("Stylize"):
             'content': (content_file.name, BytesIO(content_bytes), content_file.type),
             'style': (style_file.name, BytesIO(style_bytes), style_file.type),
         }
-        response = requests.post("http://localhost:8000/style_transfer/", files=files, data={'alpha': alpha})
+        
+        # Request to first model
+        response1 = requests.post("http://localhost:8000/style_transfer/", files=files, data={'alpha': alpha})
+        
+        # Request to second model (without alpha parameter)
+        response2 = requests.post("http://localhost:8000/style_transfer_model2/", files=files)
 
-        if response.status_code == 200:
-            image = Image.open(BytesIO(response.content))
-            col2.header("Stylized Image")
-            #resized_image = resize_image(image, 200, 200)
-            col2.image(image)
+        if response1.status_code == 200:
+            image1 = Image.open(BytesIO(response1.content))
+            col2.header("Stylized Image (StyleT Model)")
+            col2.image(image1)
         else:
-            st.error("Error in style transfer")
+            st.error(f"Error in style transfer with Model 1: {response1.status_code} - {response1.text}")
+
+        if response2.status_code == 200:
+            image2 = Image.open(BytesIO(response2.content))
+            col3.header("Stylized Image (AniGAN Model)")
+            col3.image(image2)
+        else:
+            st.error(f"Error in style transfer with Model 2: {response2.status_code} - {response2.text}")
     else:
         st.error("Please upload both content and style images")

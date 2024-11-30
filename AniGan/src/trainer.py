@@ -36,8 +36,8 @@ class Trainer(nn.Module):
         self.apply(weights_init(cfg['init']))
         self.model.gen_test = copy.deepcopy(self.model.gen)
 
-    def load_ckpt(self, ckpt_name):
-        state_dict = torch.load(ckpt_name)
+    def load_ckpt(self, ckpt_name, map_location=None):
+        state_dict = torch.load(ckpt_name, map_location=map_location)
         self.model.gen.load_state_dict(state_dict['gen'])
         self.model.gen_test.load_state_dict(state_dict['gen_test'])
         print('----------load success----------')
@@ -45,6 +45,16 @@ class Trainer(nn.Module):
     def forward(self, *inputs):
         print('Forward function not implemented.')
         pass
+    
+    def evaluate_reference(self, content_tensor, reference_tensor):
+        # Ensure the model is in evaluation mode
+        self.model.eval()
+        with torch.no_grad():
+            # Generate the image
+            generated_img = self.model(content_tensor, reference_tensor)
+            if generated_img is None:
+                raise ValueError("Generated image tensor is None")
+            return generated_img
 
 
 def get_scheduler(optimizer, hp, it=-1):
