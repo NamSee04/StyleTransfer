@@ -105,21 +105,17 @@ async def style_transfer_model2_endpoint(content: UploadFile = File(...), style:
         raise HTTPException(status_code=500, detail=f"Error reading images: {str(e)}")
 
     try:
-        content_tf = transforms.Compose([
+        transform_list = [
             transforms.Resize((128, 128)),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
-        style_tf = transforms.Compose([
-            transforms.Resize((128, 128)),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
+        ]
+        transform = transforms.Compose(transform_list)
 
-        content_tensor = content_tf(content_image).unsqueeze(0).to(device)
-        style_tensor = style_tf(style_image).unsqueeze(0).to(device)
+        content_tensor = transform(content_image).unsqueeze(0).to(device)
+        style_tensor = transform(style_image).unsqueeze(0).to(device)
 
-        config_file = 'src/configs/try4_final_r1p2.yaml'
+        config_file = 'AniGan/src/configs/try4_final_r1p2.yaml'
         config = anigan_get_config(config_file)
         trainer = anigan_trainer(config)
         trainer.to(device)
@@ -129,11 +125,15 @@ async def style_transfer_model2_endpoint(content: UploadFile = File(...), style:
         trainer.eval()
 
         with torch.no_grad():
-            generated_img = trainer.model.evaluate_reference(content_tensor, style_tensor)
+            generated_img = trainer.model.evaluate_reference(content_tensor, style_tensor, device)
             if generated_img is None:
                 raise ValueError("Generated image tensor is None")
 
+        # After generating the output_image
         output_image = transforms.ToPILImage()(generated_img.squeeze().cpu())
+
+        # Resize the output image to 512x512 pixels
+        output_image = output_image.resize((512, 512), Image.LANCZOS)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             output_image.save(tmp, format="JPEG")
