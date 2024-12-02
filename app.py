@@ -1,78 +1,162 @@
-import streamlit as st
-import requests
-from PIL import Image
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.responses import FileResponse
+import torch
+from PIL import Image, UnidentifiedImageError
 from io import BytesIO
+from StyleT.src.model import net as style_net
+from StyleT.src.model.loss import adaptive_instance_normalization
+from AniGan.src.trainer import Trainer as anigan_trainer
+from AniGan.src.utils import get_config as anigan_get_config
+from torchvision import transforms
+import torch.nn as nn
+import os
+import tempfile
 
-st.set_page_config(layout="wide")
-st.title("Style Transfer")
+app = FastAPI()
 
-# Sidebar for file upload
-st.sidebar.header("Upload Images")
-content_file = st.sidebar.file_uploader("Upload Content Image", type=["jpg", "jpeg", "png"])
-style_file = st.sidebar.file_uploader("Upload Style Image", type=["jpg", "jpeg", "png"])
+def test_transform(size, crop):
+    transform_list = []
+    if size != 0:
+        transform_list.append(transforms.Resize(size))
+    if crop:
+        transform_list.append(transforms.CenterCrop(size))
+    transform_list.append(transforms.ToTensor())
+    transform = transforms.Compose(transform_list)
+    return transform
 
-# Columns for displaying images
-col1, col2, col3 = st.columns(3)
-
-def resize_image(image, width, height):
-    return image.resize((width, height), Image.LANCZOS)
-
-if content_file is not None:
-    content_bytes = content_file.read()
-    content_image = Image.open(BytesIO(content_bytes))
-
-if style_file is not None:
-    style_bytes = style_file.read()
-    style_image = Image.open(BytesIO(style_bytes))
-
-with col1:
-    if content_file is not None:
-        st.header("Content Image")
-        resized_content_image = resize_image(content_image, 200, 200)
-        st.image(resized_content_image, width=200)
-
-    if style_file is not None:
-        st.header("Style Image")
-        resized_style_image = resize_image(style_image, 200, 200)
-        st.image(resized_style_image, width=200)
-
-if st.sidebar.button("Stylize"):
-    if content_file is not None and style_file is not None:
-        # Create new BytesIO instances for each request
-        files_model1 = {
-            'content': (content_file.name, BytesIO(content_bytes), content_file.type),
-            'style': (style_file.name, BytesIO(style_bytes), style_file.type),
-        }
-        files_model2 = {
-            'content': (content_file.name, BytesIO(content_bytes), content_file.type),
-            'style': (style_file.name, BytesIO(style_bytes), style_file.type),
-        }
-
-        # Request to first model
-        response1 = requests.post(
-            "http://localhost:8000/style_transfer/",
-            files=files_model1,
-            data={'alpha': 0.6}
-        )
-
-        # Request to second model
-        response2 = requests.post(
-            "http://localhost:8000/style_transfer_model2/",
-            files=files_model2
-        )
-
-        if response1.status_code == 200:
-            image1 = Image.open(BytesIO(response1.content))
-            col2.header("Stylized Image")
-            col2.image(image1)
-        else:
-            st.error(f"Error in style transfer with Model 1: {response1.status_code} - {response1.text}")
-
-        if response2.status_code == 200:
-            image2 = Image.open(BytesIO(response2.content))
-            col3.header("Stylized Image")
-            col3.image(image2)
-        else:
-            st.error(f"Error in style transfer with Model 2: {response2.status_code} - {response2.text}")
+def style_transfer(vgg, decoder, content, style, alpha=0.6, interpolation_weights=None):
+    assert (0.0 <= alpha <= 1.0)
+    content_f = vgg(content)
+    style_f = vgg(style)
+    if interpolation_weights:
+        _, C, H, W = content_f.size()
+        feat = torch.FloatTensor(1, C, H, W).zero_().to(content.device)
+        base_feat = adaptive_instance_normalization(content_f, style_f)
+        for i, w in enumerate(interpolation_weights):
+            feat = feat + w * base_feat[i:i + 1]
     else:
-        st.error("Please upload both content and style images")
+        feat = adaptive_instance_normalization(content_f, style_f)
+    feat = feat * alpha + content_f * (1 - alpha)
+    return decoder(feat)
+
+def _denorm(x):
+    """Convert the range from [-1, 1] to [0, 1]."""
+    if x is None:
+        raise ValueError("Input tensor is None")
+    out = (x + 1) / 2
+    return out.clamp_(0, 1)
+
+@app.post("/style_transfer/")
+async def style_transfer_endpoint(
+    content: UploadFile = File(...),
+    style: UploadFile = File(...),
+    alpha: float = Form(0.6)
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    try:
+        content_bytes = await content.read()
+        style_bytes = await style.read()
+        content_img = Image.open(BytesIO(content_bytes)).convert("RGB")
+        style_img = Image.open(BytesIO(style_bytes)).convert("RGB")
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
+    content_tf = test_transform(size=256, crop=True)
+    style_tf = test_transform(size=256, crop=True)
+
+    content_tensor = content_tf(content_img).unsqueeze(0).to(device)
+    style_tensor = style_tf(style_img).unsqueeze(0).to(device)
+
+    # Load models
+    decoder = style_net.decoder
+    vgg = style_net.vgg
+
+    decoder.eval()
+    vgg.eval()
+
+    decoder.load_state_dict(torch.load('/home/namsee/Desktop/SCHOOL/cs431/demo/StyleTransfer/StyleT/src/ckpt/z20.pth', map_location=device))
+    vgg.load_state_dict(torch.load('/home/namsee/Desktop/SCHOOL/cs431/demo/StyleTransfer/StyleT/src/ckpt/vgg_normalised.pth', map_location=device))
+    vgg = nn.Sequential(*list(vgg.children())[:31])
+
+    vgg.to(device)
+    decoder.to(device)
+
+    # Style transfer as in test.py
+    with torch.no_grad():
+        content_features = vgg(content_tensor)
+        style_features = vgg(style_tensor)
+        t = adaptive_instance_normalization(content_features, style_features)
+        t = alpha * t + (1 - alpha) * content_features
+        output = decoder(t)
+
+    # Prepare output image
+    output = output.clamp(0, 1)
+    output_image = transforms.ToPILImage()(output.squeeze(0).cpu())
+    output_image = output_image.resize((512, 512), Image.LANCZOS)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        output_image.save(tmp, format="JPEG")
+        tmp_path = tmp.name
+
+    return FileResponse(
+        tmp_path,
+        media_type="image/jpeg",
+        filename="stylized_image.jpg"
+    )
+
+@app.post("/style_transfer_model2/")
+async def style_transfer_model2_endpoint(content: UploadFile = File(...), style: UploadFile = File(...)):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    try:
+        content_bytes = await content.read()
+        style_bytes = await style.read()
+        content_img = Image.open(BytesIO(content_bytes)).convert('RGB')
+        style_img = Image.open(BytesIO(style_bytes)).convert('RGB')
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
+    # Transform images as in test.py
+    transform = transforms.Compose([
+        transforms.Resize((128, 128)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    content_tensor = transform(content_img).unsqueeze(0).to(device)
+    style_tensor = transform(style_img).unsqueeze(0).to(device)
+
+    # Load model as in test.py
+    config_file = 'AniGan/src/configs/try4_final_r1p2.yaml'
+    config = anigan_get_config(config_file)
+    trainer = anigan_trainer(config)
+    trainer.to(device)
+
+    ckpt_path = 'AniGan/src/checkpoints/try4_final_r1p2/pretrained_face2anime.pt'
+    trainer.load_ckpt(ckpt_path, map_location=device)
+    trainer.eval()  # Ensure the model is in evaluation mode
+
+    # Run model as in test.py
+    with torch.no_grad():
+        generated_img = trainer.model.evaluate_reference(content_tensor, style_tensor, device)
+        if generated_img is None:
+            raise HTTPException(status_code=500, detail="Generated image tensor is None")
+
+        # Denormalize the generated image
+        generated_img = (generated_img + 1) / 2
+        generated_img = generated_img.clamp(0, 1)
+
+    # Convert to PIL image and resize if necessary
+    output_image = transforms.ToPILImage()(generated_img.squeeze(0).cpu())
+    output_image = output_image.resize((512, 512), Image.LANCZOS)
+
+    # Save output image to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        output_image.save(tmp, format="JPEG")
+        tmp_path = tmp.name
+
+    return FileResponse(
+        tmp_path,
+        media_type="image/jpeg",
+        filename="stylized_image.jpg"
+    )
