@@ -47,25 +47,28 @@ def _denorm(x):
     return out.clamp_(0, 1)
 
 @app.post("/style_transfer/")
-async def style_transfer_endpoint(content: UploadFile = File(...), style: UploadFile = File(...), alpha: float = Form(...)):
+async def style_transfer_endpoint(
+    content: UploadFile = File(...),
+    style: UploadFile = File(...),
+    alpha: float = Form(1.0)
+):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
         content_bytes = await content.read()
         style_bytes = await style.read()
-        content_image = Image.open(BytesIO(content_bytes)).convert("RGB")
-        style_image = Image.open(BytesIO(style_bytes)).convert("RGB")
+        content_img = Image.open(BytesIO(content_bytes)).convert("RGB")
+        style_img = Image.open(BytesIO(style_bytes)).convert("RGB")
     except UnidentifiedImageError:
         raise HTTPException(status_code=400, detail="Invalid image file")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading images: {str(e)}")
 
-    content_tf = test_transform(512, False)
-    style_tf = test_transform(512, False)
+    content_tf = test_transform(size=512, crop=True)
+    style_tf = test_transform(size=512, crop=True)
 
-    content_tensor = content_tf(content_image).unsqueeze(0).to(device)
-    style_tensor = style_tf(style_image).unsqueeze(0).to(device)
+    content_tensor = content_tf(content_img).unsqueeze(0).to(device)
+    style_tensor = style_tf(style_img).unsqueeze(0).to(device)
 
+    # Load models
     decoder = style_net.decoder
     vgg = style_net.vgg
 
@@ -79,16 +82,27 @@ async def style_transfer_endpoint(content: UploadFile = File(...), style: Upload
     vgg.to(device)
     decoder.to(device)
 
+    # Style transfer as in test.py
     with torch.no_grad():
-        output = style_transfer(vgg, decoder, content_tensor, style_tensor, alpha)
+        content_features = vgg(content_tensor)
+        style_features = vgg(style_tensor)
+        t = adaptive_instance_normalization(content_features, style_features)
+        t = alpha * t + (1 - alpha) * content_features
+        output = decoder(t)
 
-    output_image = transforms.ToPILImage()(output.squeeze().cpu())
+    # Prepare output image
+    output = output.clamp(0, 1)
+    output_image = transforms.ToPILImage()(output.squeeze(0).cpu())
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         output_image.save(tmp, format="JPEG")
         tmp_path = tmp.name
 
-    return FileResponse(tmp_path, media_type="image/jpeg", filename="stylized_image.jpg")
+    return FileResponse(
+        tmp_path,
+        media_type="image/jpeg",
+        filename="stylized_image.jpg"
+    )
 
 @app.post("/style_transfer_model2/")
 async def style_transfer_model2_endpoint(content: UploadFile = File(...), style: UploadFile = File(...)):
@@ -97,49 +111,52 @@ async def style_transfer_model2_endpoint(content: UploadFile = File(...), style:
     try:
         content_bytes = await content.read()
         style_bytes = await style.read()
-        content_image = Image.open(BytesIO(content_bytes)).convert("RGB")
-        style_image = Image.open(BytesIO(style_bytes)).convert("RGB")
+        content_img = Image.open(BytesIO(content_bytes)).convert('RGB')
+        style_img = Image.open(BytesIO(style_bytes)).convert('RGB')
     except UnidentifiedImageError:
         raise HTTPException(status_code=400, detail="Invalid image file")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading images: {str(e)}")
 
-    try:
-        transform_list = [
-            transforms.Resize((128, 128)),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ]
-        transform = transforms.Compose(transform_list)
+    # Transform images as in test.py
+    transform = transforms.Compose([
+        transforms.Resize((128, 128)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    content_tensor = transform(content_img).unsqueeze(0).to(device)
+    style_tensor = transform(style_img).unsqueeze(0).to(device)
 
-        content_tensor = transform(content_image).unsqueeze(0).to(device)
-        style_tensor = transform(style_image).unsqueeze(0).to(device)
+    # Load model as in test.py
+    config_file = 'AniGan/src/configs/try4_final_r1p2.yaml'
+    config = anigan_get_config(config_file)
+    trainer = anigan_trainer(config)
+    trainer.to(device)
 
-        config_file = 'AniGan/src/configs/try4_final_r1p2.yaml'
-        config = anigan_get_config(config_file)
-        trainer = anigan_trainer(config)
-        trainer.to(device)
+    ckpt_path = 'AniGan/src/checkpoints/try4_final_r1p2/pretrained_face2anime.pt'
+    trainer.load_ckpt(ckpt_path, map_location=device)
+    trainer.eval()  # Ensure the model is in evaluation mode
 
-        ckpt_path = 'AniGan/src/checkpoints/try4_final_r1p2/pretrained_face2anime.pt'
-        trainer.load_ckpt(ckpt_path, map_location=device)
-        trainer.eval()
+    # Run model as in test.py
+    with torch.no_grad():
+        generated_img = trainer.model.evaluate_reference(content_tensor, style_tensor, device)
+        if generated_img is None:
+            raise HTTPException(status_code=500, detail="Generated image tensor is None")
 
-        with torch.no_grad():
-            generated_img = trainer.model.evaluate_reference(content_tensor, style_tensor, device)
-            if generated_img is None:
-                raise ValueError("Generated image tensor is None")
+        # Denormalize the generated image
+        generated_img = (generated_img + 1) / 2
+        generated_img = generated_img.clamp(0, 1)
 
-        # After generating the output_image
-        output_image = transforms.ToPILImage()(generated_img.squeeze().cpu())
+    # Convert to PIL image and resize if necessary
+    output_image = transforms.ToPILImage()(generated_img.squeeze(0).cpu())
+    output_image = output_image.resize((512, 512), Image.LANCZOS)
 
-        # Resize the output image to 512x512 pixels
-        output_image = output_image.resize((512, 512), Image.LANCZOS)
+    # Save output image to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        output_image.save(tmp, format="JPEG")
+        tmp_path = tmp.name
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            output_image.save(tmp, format="JPEG")
-            tmp_path = tmp.name
+    return FileResponse(
+        tmp_path,
+        media_type="image/jpeg",
+        filename="stylized_image.jpg"
+    )
 
-        return FileResponse(tmp_path, media_type="image/jpeg", filename="stylized_image.jpg")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
