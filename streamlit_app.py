@@ -10,7 +10,6 @@ st.title("Style Transfer")
 st.sidebar.header("Upload Images")
 content_file = st.sidebar.file_uploader("Upload Content Image", type=["jpg", "jpeg", "png"])
 style_file = st.sidebar.file_uploader("Upload Style Image", type=["jpg", "jpeg", "png"])
-alpha = st.sidebar.slider("Stylization Strength (Alpha)", 0.0, 1.0, 1.0)
 
 # Columns for displaying images
 col1, col2, col3 = st.columns(3)
@@ -53,7 +52,7 @@ if st.sidebar.button("Stylize"):
         response1 = requests.post(
             "http://localhost:8000/style_transfer/",
             files=files_model1,
-            data={'alpha': alpha}
+            data={'alpha': 0.6}
         )
 
         # Request to second model
@@ -64,14 +63,14 @@ if st.sidebar.button("Stylize"):
 
         if response1.status_code == 200:
             image1 = Image.open(BytesIO(response1.content))
-            col2.header("Stylized Image (StyleT Model)")
+            col2.header("Stylized Image")
             col2.image(image1)
         else:
             st.error(f"Error in style transfer with Model 1: {response1.status_code} - {response1.text}")
 
         if response2.status_code == 200:
             image2 = Image.open(BytesIO(response2.content))
-            col3.header("Stylized Image (AniGAN Model)")
+            col3.header("Stylized Image")
             col3.image(image2)
         else:
             st.error(f"Error in style transfer with Model 2: {response2.status_code} - {response2.text}")
